@@ -915,6 +915,13 @@ impl ComponentInstance {
         self.instances[idx]
     }
 
+    /// (monocp fork extension) Fallible variant of [`Self::instance`] that
+    /// returns `None` if `idx` has not been instantiated yet, rather than
+    /// panicking. Used by the host-facing `Instance::get_core_shared_memory`.
+    pub fn get_instance(&self, idx: RuntimeInstanceIndex) -> Option<InstanceId> {
+        self.instances.get(idx).copied()
+    }
+
     fn instances_mut(self: Pin<&mut Self>) -> &mut PrimaryMap<RuntimeInstanceIndex, InstanceId> {
         // SAFETY: we've chosen the `Pin` guarantee of `Self` to not apply to
         // the map returned.

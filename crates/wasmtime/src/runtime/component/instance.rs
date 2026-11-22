@@ -237,6 +237,61 @@ impl Instance {
         }
     }
 
+    /// (monocp fork extension) Fetches a [`SharedMemory`] that is *defined and
+    /// exported* by one of this component's inner core wasm instances.
+    ///
+    /// The component model has no notion of exporting a (shared) memory to the
+    /// host -- only lifted functions, modules, resources, and instances cross
+    /// the component boundary. However, for the wasi-threads bring-up we need a
+    /// host handle to the *inner core* linear memory so that worker OS threads
+    /// can share it. This method bridges that gap: given the runtime index of
+    /// an inner core instance (`core_instance_index`) and the name under which
+    /// that core instance exports its memory, it resolves the live core
+    /// `Instance` and returns its [`SharedMemory`] handle.
+    ///
+    /// Returns `None` if the index does not correspond to an instantiated core
+    /// instance, or if that instance has no shared-memory export by that name.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `store` does not own this instance.
+    pub fn get_core_shared_memory(
+        &self,
+        mut store: impl AsContextMut,
+        core_instance_index: u32,
+        name: &str,
+    ) -> Option<crate::SharedMemory> {
+        let store = store.as_context_mut().0;
+        // Resolve the inner core `InstanceId` via the component's runtime
+        // `instances` PrimaryMap (vm/component.rs), exactly like the runtime
+        // does for `lookup_vmexport`.
+        let rt_index = RuntimeInstanceIndex::from_u32(core_instance_index);
+        let component = self.id().get(store);
+        let core_id = component.get_instance(rt_index)?;
+        // Reconstruct the core `wasmtime::Instance` for that id and reuse its
+        // existing shared-memory export lookup.
+        let core = crate::Instance::from_wasmtime(core_id, store);
+        core.get_shared_memory(store, name)
+    }
+
+    /// (monocp fork extension, THROWAWAY probe) Fetches the inner core
+    /// [`Module`] backing the core instance at runtime index
+    /// `core_instance_index`. Mirrors `get_core_shared_memory`'s resolution.
+    /// Used to attempt a wasi-threads-style re-instantiation of the inner core
+    /// module on a worker OS thread.
+    pub fn get_core_instance_module(
+        &self,
+        mut store: impl AsContextMut,
+        core_instance_index: u32,
+    ) -> Option<Module> {
+        let store = store.as_context_mut().0;
+        let rt_index = RuntimeInstanceIndex::from_u32(core_instance_index);
+        let component = self.id().get(store);
+        let core_id = component.get_instance(rt_index)?;
+        let sid = crate::store::StoreInstanceId::new(store.id(), core_id);
+        store.module_for_instance(sid).cloned()
+    }
+
     /// Looks up an exported resource type by name within this [`Instance`].
     ///
     /// The `store` argument provided must be the store that this instance
